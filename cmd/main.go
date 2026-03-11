@@ -32,6 +32,26 @@ func main() {
 	}
 
 	fmt.Println("PKCE generated successfully.")
-	fmt.Printf("Verifier  : %s\n", pkce.Verifier)
-	fmt.Printf("Challenge : %s\n", pkce.Challenge)
+
+	authURL := fmt.Sprintf(
+		"https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=%s&redirect_uri=%s&code_challenge=%s&code_challenge_method=S256",
+		clientID, redirectURI, pkce.Challenge,
+	)
+
+	fmt.Println("\nOpening browser for MAL authentication...")
+	if err := auth.OpenBrowser(authURL); err != nil {
+		// If auto-open fails, fall back to manual
+		fmt.Println("Could not open browser automatically. Open this URL manually:")
+		fmt.Println(authURL)
+	}
+
+	fmt.Println("Waiting for callback...")
+
+	code, err := auth.WaitForCode("8080")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("\nAuthorization code received successfully.")
+	fmt.Printf("Code : %s\n", code)
 }
