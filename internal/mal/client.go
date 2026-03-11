@@ -24,7 +24,6 @@ func GetAnimeList(accessToken string) ([]ListEntry, error) {
 
 		results = append(results, page.Data...)
 
-		// No next page — we have everything
 		if page.Paging.Next == "" {
 			break
 		}
@@ -39,11 +38,11 @@ func GetAnimeList(accessToken string) ([]ListEntry, error) {
 // at the given offset and returns the decoded page response
 func fetchPage(accessToken string, offset int) (*pageResponse, error) {
 	params := url.Values{}
-	params.Set("fields", "list_status")
+	params.Set("fields", "list_status,num_episodes")
 	params.Set("limit", strconv.Itoa(config.MALListLimit))
 	params.Set("offset", strconv.Itoa(offset))
 
-	endpoint := config.MALAPIBaseURL + config.MALAnimeListEndpoint + "?" + params.Encode()
+	endpoint := config.MALAPIBaseURL + "/users/@me/animelist?" + params.Encode()
 
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {

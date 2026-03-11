@@ -9,6 +9,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/jyotil-raval/mal-updater/internal/auth"
 	"github.com/jyotil-raval/mal-updater/internal/config"
+	"github.com/jyotil-raval/mal-updater/internal/diff"
 	"github.com/jyotil-raval/mal-updater/internal/mal"
 	"github.com/jyotil-raval/mal-updater/internal/store"
 )
@@ -75,13 +76,32 @@ func main() {
 		fmt.Println("Token saved successfully.")
 	}
 
-	fmt.Printf("\nAccess Token : %s...\n", token.AccessToken[:20])
-	fmt.Printf("Expires At   : %s\n", token.ExpiresAt.Format("2006-01-02 15:04:05"))
-
+	// Phase 5 — Fetch MAL list
 	fmt.Println("Fetching anime list from MAL...")
-	entries, err := mal.GetAnimeList(token.AccessToken)
+	malEntries, err := mal.GetAnimeList(token.AccessToken)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("Fetched %d entries from MAL\n", len(entries))
+	fmt.Printf("Fetched %d entries from MAL\n", len(malEntries))
+
+	// Phase 6 — Load local watchlist
+	fmt.Println("Loading local watchlist...")
+	watchlist, err := diff.LoadWatchlist("watchlist.json")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Loaded %d entries from watchlist\n", len(watchlist))
+
+	// Phase 6 — Diff
+	fmt.Println("Comparing watchlist against MAL...")
+	updates, err := diff.Compare(watchlist, malEntries)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("%d updates needed\n", len(updates))
+
+	for _, u := range updates {
+		fmt.Printf("  [%d] %s → status: %s, episodes: %d\n",
+			u.AnimeID, u.Title, u.Status, u.Episodes)
+	}
 }

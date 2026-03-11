@@ -8,8 +8,9 @@ type ListEntry struct {
 
 // Node holds the core identity of an anime
 type Node struct {
-	ID    int    `json:"id"`
-	Title string `json:"title"`
+	ID          int    `json:"id"`
+	Title       string `json:"title"`
+	NumEpisodes int    `json:"num_episodes"`
 }
 
 // ListStatus holds the user's watch state for a given anime
