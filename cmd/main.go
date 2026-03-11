@@ -6,10 +6,10 @@ import (
 	"os"
 
 	"github.com/joho/godotenv"
+	"github.com/jyotil-raval/mal-updater/internal/auth"
 )
 
 func main() {
-	// Load .env file into process environment
 	if err := godotenv.Load(); err != nil {
 		log.Fatal("Error loading .env file")
 	}
@@ -25,6 +25,13 @@ func main() {
 	}
 
 	fmt.Println("Environment loaded successfully.")
-	fmt.Printf("Client ID : %s\n", clientID)
-	fmt.Printf("Redirect  : %s\n", redirectURI)
+
+	pkce, err := auth.GeneratePKCE()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("PKCE generated successfully.")
+	fmt.Printf("Verifier  : %s\n", pkce.Verifier)
+	fmt.Printf("Challenge : %s\n", pkce.Challenge)
 }
