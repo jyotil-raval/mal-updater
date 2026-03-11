@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net/url"
@@ -16,6 +17,10 @@ import (
 )
 
 func main() {
+	// Phase 9 — CLI flags
+	dryRun := flag.Bool("dry-run", false, "Print planned updates without applying them")
+	flag.Parse()
+
 	if err := godotenv.Load(); err != nil {
 		log.Fatal("Error loading .env file")
 	}
@@ -32,7 +37,7 @@ func main() {
 
 	fmt.Println("Environment loaded successfully.")
 
-	// Phase 4 — Auth with Phase 8 refresh layer
+	// Phase 4 — Auth
 	token, err := loadOrRefreshToken(clientID, redirectURI)
 	if err != nil {
 		log.Fatal(err)
@@ -63,6 +68,17 @@ func main() {
 
 	if len(updates) == 0 {
 		fmt.Println("MAL is already in sync. Nothing to do.")
+		return
+	}
+
+	// Phase 9 — Dry run path
+	if *dryRun {
+		fmt.Println("\n[DRY RUN] No changes will be applied.\n")
+		for _, u := range updates {
+			fmt.Printf("  ~ [%d] %s → status: %s, episodes: %d\n",
+				u.AnimeID, u.Title, u.Status, u.Episodes)
+		}
+		fmt.Printf("\n[DRY RUN] %d updates would be applied.\n", len(updates))
 		return
 	}
 
@@ -97,7 +113,6 @@ func loadOrRefreshToken(clientID, redirectURI string) (store.Token, error) {
 		return token, nil
 	}
 
-	// Token expired — attempt silent refresh
 	if err == nil && token.IsExpired() {
 		fmt.Println("Token expired. Attempting silent refresh...")
 		refreshed, refreshErr := auth.RefreshToken(clientID, token.RefreshToken)
@@ -111,7 +126,6 @@ func loadOrRefreshToken(clientID, redirectURI string) (store.Token, error) {
 		fmt.Printf("Refresh failed (%v). Falling back to full authentication.\n", refreshErr)
 	}
 
-	// No valid token or refresh failed — full auth flow
 	fmt.Println("No valid token found. Starting authentication flow...")
 	return fullAuthFlow(clientID, redirectURI)
 }
