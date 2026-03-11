@@ -100,7 +100,7 @@ MAL_REDIRECT_URI=http://localhost:8080/callback
 ### Add Your Watchlist
 
 Export your watchlist from HiAnime and save it as `watchlist.json` in the
-project root. Use `watchlist.example.json` as a reference for the expected format.
+project root. Use `watchlist.example.1.json`, `watchlist.example.2.json` as a reference for the expected format.
 
 ### Run
 
