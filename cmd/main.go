@@ -9,6 +9,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/jyotil-raval/mal-updater/internal/auth"
 	"github.com/jyotil-raval/mal-updater/internal/config"
+	"github.com/jyotil-raval/mal-updater/internal/mal"
 	"github.com/jyotil-raval/mal-updater/internal/store"
 )
 
@@ -76,4 +77,11 @@ func main() {
 
 	fmt.Printf("\nAccess Token : %s...\n", token.AccessToken[:20])
 	fmt.Printf("Expires At   : %s\n", token.ExpiresAt.Format("2006-01-02 15:04:05"))
+
+	fmt.Println("Fetching anime list from MAL...")
+	entries, err := mal.GetAnimeList(token.AccessToken)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Fetched %d entries from MAL\n", len(entries))
 }

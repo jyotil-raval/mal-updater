@@ -6,7 +6,8 @@ const (
 	MALTokenURL = "https://myanimelist.net/v1/oauth2/token"
 
 	// MAL API
-	MALAPIBaseURL = "https://api.myanimelist.net/v2"
+	MALAPIBaseURL        = "https://api.myanimelist.net/v2"
+	MALAnimeListEndpoint = "/users/@me/animelist"
 
 	// OAuth2 flow
 	CallbackPort     = "8080"
