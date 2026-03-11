@@ -33,3 +33,4 @@ go.work.sum
 
 # Input Json file
 watchlist.json
+token.json

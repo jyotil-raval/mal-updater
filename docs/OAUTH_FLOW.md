@@ -20,6 +20,25 @@ storing the secret itself.
 
 ---
 
+## MAL-Specific Behavior
+
+> ⚠️ This is a known undocumented quirk in MAL's OAuth2 implementation.
+
+Despite the OAuth2 PKCE spec recommending `S256`, MAL's token endpoint
+validates using the `plain` method — the `code_verifier` is compared
+directly to the stored `code_challenge` without hashing.
+
+**What this means in practice:**
+
+- `code_challenge_method` is set to `plain` in this implementation
+- `pkce.Challenge` equals `pkce.Verifier` — no SHA256 step applied
+- Sending `S256` in the auth URL causes a `400 invalid_grant` error
+  with hint: `"Failed to verify code_verifier"`
+
+This behavior is consistent across all known community MAL API clients.
+
+---
+
 ## Flow Diagram
 
 ```
@@ -27,7 +46,8 @@ Your CLI                    Browser                   MAL Auth Server
     |                          |                             |
     |-- Generate PKCE pair --->|                             |
     |   verifier (secret)      |                             |
-    |   challenge (hash)       |                             |
+    |   challenge = verifier   |                             |
+    |   (plain method)         |                             |
     |                          |                             |
     |-- Open auth URL -------->|                             |
     |   (with code_challenge)  |-- User logs in ----------->|
@@ -50,11 +70,11 @@ Your CLI                    Browser                   MAL Auth Server
 
 ### Step 1 — Generate PKCE Pair
 
-The CLI generates two values before opening the browser:
+The CLI generates the verifier before opening the browser:
 
 ```
 code_verifier  = BASE64URL(32 random bytes)
-code_challenge = BASE64URL(SHA256(code_verifier))
+code_challenge = code_verifier  ← plain method, no hashing
 ```
 
 - `code_verifier` is kept in memory — never sent until token exchange
@@ -66,7 +86,7 @@ code_challenge = BASE64URL(SHA256(code_verifier))
 
 ### Step 2 — Open Authorization URL
 
-The CLI constructs and prints (or opens) this URL:
+The CLI constructs and opens this URL:
 
 ```
 https://myanimelist.net/v1/oauth2/authorize
@@ -74,7 +94,7 @@ https://myanimelist.net/v1/oauth2/authorize
   &client_id=YOUR_CLIENT_ID
   &redirect_uri=http://localhost:8080/callback
   &code_challenge=YOUR_CODE_CHALLENGE
-  &code_challenge_method=S256
+  &code_challenge_method=plain
 ```
 
 **Parameters:**
@@ -84,10 +104,12 @@ https://myanimelist.net/v1/oauth2/authorize
 | `response_type`         | `code`                           | Always `code` for this flow       |
 | `client_id`             | Your MAL client ID               | From `.env`                       |
 | `redirect_uri`          | `http://localhost:8080/callback` | Must match registered URI exactly |
-| `code_challenge`        | SHA256 hash of verifier          | Base64url, no padding             |
-| `code_challenge_method` | `S256`                           | Always `S256` — not `plain`       |
+| `code_challenge`        | Same as verifier                 | plain method — no hashing         |
+| `code_challenge_method` | `plain`                          | MAL does not support `S256`       |
 
 The user logs into MAL in their browser and approves the request.
+
+**Go implementation:** `cmd/main.go` → `url.Values` + `auth.OpenBrowser()`
 
 ---
 
@@ -125,9 +147,8 @@ client_id=YOUR_CLIENT_ID
 &code_verifier=YOUR_CODE_VERIFIER
 ```
 
-MAL hashes the `code_verifier`, compares it to the `code_challenge` sent in
-Step 2, and only issues tokens if they match. This proves the entity exchanging
-the code is the same entity that started the flow.
+MAL compares the `code_verifier` directly to the stored `code_challenge`
+(plain method). If they match, tokens are issued.
 
 **Response:**
 
@@ -154,7 +175,7 @@ Tokens are written to `token.json` in the project root with file permission
   "access_token": "...",
   "refresh_token": "...",
   "token_type": "Bearer",
-  "expires_at": "2026-03-11T15:30:00Z"
+  "expires_at": "2026-04-11T16:51:07Z"
 }
 ```
 
@@ -217,6 +238,7 @@ Subsequent runs (refresh token expired):
 | token.json exposure          | File permission `0600` + `.gitignore`               |
 | Credentials in shell history | Loaded from `.env`, never passed as CLI flags       |
 | Client secret exposure       | No client secret — PKCE eliminates the need         |
+| S256 vs plain                | MAL forces plain — no workaround available          |
 
 ---
 
