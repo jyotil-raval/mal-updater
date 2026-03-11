@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/jyotil-raval/mal-updater/internal/config"
 	"github.com/jyotil-raval/mal-updater/internal/store"
 )
 
@@ -16,12 +17,12 @@ import (
 func ExchangeCode(clientID, redirectURI, code, verifier string) (store.Token, error) {
 	form := url.Values{}
 	form.Set("client_id", clientID)
-	form.Set("grant_type", "authorization_code")
+	form.Set("grant_type", config.GrantTypeAuth)
 	form.Set("code", code)
 	form.Set("redirect_uri", redirectURI)
 	form.Set("code_verifier", verifier)
 
-	resp, err := http.PostForm("https://myanimelist.net/v1/oauth2/token", form)
+	resp, err := http.PostForm(config.MALTokenURL, form)
 	if err != nil {
 		return store.Token{}, fmt.Errorf("token exchange request: %w", err)
 	}

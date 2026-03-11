@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+
+	"github.com/jyotil-raval/mal-updater/internal/config"
 )
 
 // WaitForCode starts a temporary local HTTP server, waits for the OAuth2
@@ -15,7 +17,7 @@ func WaitForCode(port string) (string, error) {
 	mux := http.NewServeMux()
 	server := &http.Server{Addr: ":" + port, Handler: mux}
 
-	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(config.CallbackPath, func(w http.ResponseWriter, r *http.Request) {
 		code := r.URL.Query().Get("code")
 		if code == "" {
 			errChan <- fmt.Errorf("no code in callback URL")

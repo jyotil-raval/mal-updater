@@ -8,6 +8,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/jyotil-raval/mal-updater/internal/auth"
+	"github.com/jyotil-raval/mal-updater/internal/config"
 	"github.com/jyotil-raval/mal-updater/internal/store"
 )
 
@@ -44,9 +45,9 @@ func main() {
 		params.Set("client_id", clientID)
 		params.Set("redirect_uri", redirectURI)
 		params.Set("code_challenge", pkce.Challenge)
-		params.Set("code_challenge_method", "plain")
+		params.Set("code_challenge_method", config.PKCEMethod)
 
-		authURL := "https://myanimelist.net/v1/oauth2/authorize?" + params.Encode()
+		authURL := config.MALAuthURL + "?" + params.Encode()
 
 		fmt.Println("Opening browser for MAL authentication...")
 		if err := auth.OpenBrowser(authURL); err != nil {
@@ -55,7 +56,7 @@ func main() {
 		}
 
 		fmt.Println("Waiting for callback...")
-		code, err := auth.WaitForCode("8080")
+		code, err := auth.WaitForCode(config.CallbackPort)
 		if err != nil {
 			log.Fatal(err)
 		}

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 	"time"
-)
 
-const tokenFile = "token.json"
+	"github.com/jyotil-raval/mal-updater/internal/config"
+)
 
 // Token holds the OAuth2 token response from MAL
 type Token struct {
@@ -17,9 +17,9 @@ type Token struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
-// IsExpired returns true if the access token is within 5 minutes of expiry
+// IsExpired returns true if the access token is within the buffer window of expiry
 func (t *Token) IsExpired() bool {
-	return time.Now().After(t.ExpiresAt.Add(-5 * time.Minute))
+	return time.Now().After(t.ExpiresAt.Add(-config.TokenExpireBuffer * time.Minute))
 }
 
 // Save writes the token to disk as JSON with owner-only permissions
@@ -28,7 +28,7 @@ func Save(t Token) error {
 	if err != nil {
 		return fmt.Errorf("marshaling token: %w", err)
 	}
-	if err := os.WriteFile(tokenFile, data, 0600); err != nil {
+	if err := os.WriteFile(config.TokenFile, data, 0600); err != nil {
 		return fmt.Errorf("writing token file: %w", err)
 	}
 	return nil
@@ -36,7 +36,7 @@ func Save(t Token) error {
 
 // Load reads and parses the token from disk
 func Load() (Token, error) {
-	data, err := os.ReadFile(tokenFile)
+	data, err := os.ReadFile(config.TokenFile)
 	if err != nil {
 		return Token{}, fmt.Errorf("reading token file: %w", err)
 	}
