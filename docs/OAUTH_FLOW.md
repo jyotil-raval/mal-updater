@@ -243,3 +243,48 @@ Subsequent runs (refresh token expired):
 ---
 
 _Last updated: March 2026_
+
+---
+
+## Token Refresh Flow
+
+### Why Refresh?
+
+The access token expires in 31 days. Without refresh, the user must
+re-authenticate manually every month. The refresh token lasts much longer
+and can silently obtain a new access token without browser interaction.
+
+### Refresh Endpoint
+
+```
+POST https://myanimelist.net/v1/oauth2/token
+Content-Type: application/x-www-form-urlencoded
+
+client_id=YOUR_CLIENT_ID
+&grant_type=refresh_token
+&refresh_token=YOUR_REFRESH_TOKEN
+```
+
+Response shape is identical to the initial token exchange — same fields,
+new values. The new token pair completely replaces the old one.
+
+### Refresh Logic (in cmd/main.go)
+
+```
+Load token.json
+If token is valid → use directly
+If token is expired:
+  Attempt RefreshToken()
+  If refresh succeeds → save new token → use
+  If refresh fails → full auth flow (Steps 1–5)
+```
+
+### When Does the Refresh Token Expire?
+
+MAL does not document refresh token lifetime. In practice, refresh tokens
+appear to be long-lived (months). If `RefreshToken()` returns a 400 error,
+the tool falls back to full re-authentication automatically.
+
+### Go implementation
+
+`internal/auth/refresh.go` → `RefreshToken(clientID, refreshToken string) (store.Token, error)`
