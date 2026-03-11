@@ -1,0 +1,34 @@
+{
+    "Plan to Watch": [
+        {
+            "link": "https://myanimelist.net/anime/47790",
+            "name": "The World's Finest Assassin Gets Reincarnated in a Different World as an Aristocrat",
+            "mal_id": 47790,
+            "watchListType": 5
+        }
+    ],
+    "Watching": [
+        {
+            "link": "https://myanimelist.net/anime/34566",
+            "name": "Boruto: Naruto Next Generations",
+            "mal_id": 34566,
+            "watchListType": 1
+        }
+    ],
+    "On-Hold": [
+        {
+            "link": "https://myanimelist.net/anime/21",
+            "name": "One Piece",
+            "mal_id": 21,
+            "watchListType": 2
+        }
+    ],
+    "Dropped": [
+        {
+            "link": "https://myanimelist.net/anime/10507",
+            "name": "Inazuma Eleven Go",
+            "mal_id": 10507,
+            "watchListType": 4
+        }
+    ]
+}
