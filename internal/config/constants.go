@@ -22,4 +22,7 @@ const (
 
 	// API limits
 	MALListLimit = 1000 // max entries per page MAL allows
+
+	// Updater
+	MALUpdateConcurrency = 3 // max concurrent PATCH requests
 )

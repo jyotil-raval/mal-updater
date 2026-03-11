@@ -12,6 +12,7 @@ import (
 	"github.com/jyotil-raval/mal-updater/internal/diff"
 	"github.com/jyotil-raval/mal-updater/internal/mal"
 	"github.com/jyotil-raval/mal-updater/internal/store"
+	"github.com/jyotil-raval/mal-updater/internal/updater"
 )
 
 func main() {
@@ -31,6 +32,7 @@ func main() {
 
 	fmt.Println("Environment loaded successfully.")
 
+	// Phase 4 — Auth
 	token, err := store.Load()
 	if err == nil && !token.IsExpired() {
 		fmt.Println("Existing token loaded. Skipping authentication.")
@@ -77,31 +79,47 @@ func main() {
 	}
 
 	// Phase 5 — Fetch MAL list
-	fmt.Println("Fetching anime list from MAL...")
+	fmt.Println("\nFetching anime list from MAL...")
 	malEntries, err := mal.GetAnimeList(token.AccessToken)
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("Fetched %d entries from MAL\n", len(malEntries))
 
-	// Phase 6 — Load local watchlist
-	fmt.Println("Loading local watchlist...")
+	// Phase 6 — Load local watchlist + diff
+	fmt.Println("\nLoading local watchlist...")
 	watchlist, err := diff.LoadWatchlist("watchlist.json")
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("Loaded %d entries from watchlist\n", len(watchlist))
 
-	// Phase 6 — Diff
-	fmt.Println("Comparing watchlist against MAL...")
+	fmt.Println("\nComparing watchlist against MAL...")
 	updates, err := diff.Compare(watchlist, malEntries)
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("%d updates needed\n", len(updates))
 
-	for _, u := range updates {
-		fmt.Printf("  [%d] %s → status: %s, episodes: %d\n",
-			u.AnimeID, u.Title, u.Status, u.Episodes)
+	if len(updates) == 0 {
+		fmt.Println("MAL is already in sync. Nothing to do.")
+		return
+	}
+
+	// Phase 7 — Apply updates
+	fmt.Printf("\nApplying %d updates (concurrency: %d)...\n",
+		len(updates), config.MALUpdateConcurrency)
+
+	errs := updater.ApplyUpdates(updates, token.AccessToken)
+
+	fmt.Printf("\nDone. %d succeeded, %d failed.\n",
+		len(updates)-len(errs), len(errs))
+
+	if len(errs) > 0 {
+		fmt.Println("\nFailed updates:")
+		for _, e := range errs {
+			log.Printf("  %v", e)
+		}
+		os.Exit(1)
 	}
 }
