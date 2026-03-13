@@ -17,10 +17,12 @@ import (
 )
 
 func main() {
+	// main orchestrates the CLI flow: parse flags, load env, authenticate, diff watchlist, and optionally apply MAL updates.
 	// Phase 9 — CLI flags
 	dryRun := flag.Bool("dry-run", false, "Print planned updates without applying them")
 	flag.Parse()
 
+	// Load .env early so required credentials are present; fail fast if the file is missing or unreadable.
 	if err := godotenv.Load(); err != nil {
 		log.Fatal("Error loading .env file")
 	}
@@ -130,8 +132,7 @@ func loadOrRefreshToken(clientID, redirectURI string) (store.Token, error) {
 	return fullAuthFlow(clientID, redirectURI)
 }
 
-// fullAuthFlow runs the complete browser-based OAuth2 PKCE flow
-// and returns a saved token on success
+// fullAuthFlow runs the browser-based OAuth2 PKCE (Proof Key for Code Exchange) flow end-to-end and persists the received token before returning it.
 func fullAuthFlow(clientID, redirectURI string) (store.Token, error) {
 	pkce, err := auth.GeneratePKCE()
 	if err != nil {
