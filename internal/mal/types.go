@@ -11,6 +11,7 @@ type Node struct {
 	ID          int    `json:"id"`
 	Title       string `json:"title"`
 	NumEpisodes int    `json:"num_episodes"`
+	MediaType   string `json:"media_type"` // tv | movie | ova | special | ona | music
 }
 
 // ListStatus holds the user's watch state for a given anime

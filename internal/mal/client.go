@@ -38,7 +38,7 @@ func GetAnimeList(accessToken string) ([]ListEntry, error) {
 // at the given offset and returns the decoded page response
 func fetchPage(accessToken string, offset int) (*pageResponse, error) {
 	params := url.Values{}
-	params.Set("fields", "list_status,num_episodes")
+	params.Set("fields", "list_status,num_episodes,media_type")
 	params.Set("limit", strconv.Itoa(config.MALListLimit))
 	params.Set("offset", strconv.Itoa(offset))
 
