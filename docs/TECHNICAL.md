@@ -11,6 +11,7 @@
 - [Architecture](#architecture)
 - [Data Flow](#data-flow)
 - [HTTP API](#http-api)
+- [Docker](#docker)
 - [External Dependencies](#external-dependencies)
 - [Configuration Reference](#configuration-reference)
 - [Critical Implementation Notes](#critical-implementation-notes)
@@ -24,7 +25,7 @@
 | Language              | Go 1.26 · darwin/arm64 (Apple Silicon)                    |
 | Module                | `github.com/jyotil-raval/mal-updater`                     |
 | External dependencies | `godotenv v1.5.1` · `golang-jwt/jwt v5` · `go-chi/chi v5` |
-| Status                | Phase 11 complete — Docker in progress                    |
+| Status                | Complete — 12 phases shipped                              |
 
 **Purpose:** CLI tool and HTTP API that synchronises a locally exported HiAnime watchlist with a MyAnimeList (MAL) account. Handles OAuth2 authentication, reads the local watchlist in multiple formats, computes the diff against the current MAL state, and applies required updates concurrently via the MAL REST API. Exposes a JWT-protected REST API consumable as a microservice by Project 2.
 
@@ -85,8 +86,9 @@ mal-updater/
 ├── watchlist.example.json
 ├── .env                         # gitignored
 ├── .env.example
-├── Dockerfile                   # Phase 12
-└── docker-compose.yml           # Phase 12
+├── .dockerignore                # Excludes secrets, tooling, docs from build context
+├── Dockerfile                   # Two-stage build
+└── docker-compose.yml           # Port binding · env injection · volume mounts
 ```
 
 ---
@@ -187,6 +189,7 @@ token → imports → auth        ❌ circular
 │                                                      │
 │  CLI:    go run cmd/main.go [--dry-run]              │
 │  Server: go run cmd/server/main.go                   │
+│  Docker: docker compose up                           │
 │                                                      │
 │  flag.Parse() · godotenv.Load() · validate env vars  │
 └──────────────────────┬───────────────────────────────┘
@@ -284,10 +287,7 @@ No auth required. Issues a signed JWT.
 
 ```json
 // response
-{
-  "token": "eyJhbGci...",
-  "expires_in": 86400
-}
+{ "token": "eyJhbGci...", "expires_in": 86400 }
 ```
 
 ### POST /sync
@@ -296,27 +296,16 @@ Diffs the supplied watchlist against MAL and applies updates.
 
 ```json
 // request
-{
-  "watchlist": [
-    { "mal_id": 1535, "watchListType": 5 },
-    { "mal_id": 16498, "watchListType": 1 }
-  ],
-  "dry_run": false
-}
+{ "watchlist": [{ "mal_id": 1535, "watchListType": 5 }], "dry_run": false }
 
 // response
-{
-  "total": 2,
-  "succeeded": 2,
-  "failed": 0,
-  "dry_run": false
-}
+{ "total": 1, "succeeded": 1, "failed": 0, "dry_run": false }
 ```
 
 ### PATCH /anime/:id
 
-Updates a single MAL entry. When `status` is `completed` and `episodes` is not supplied,
-the total episode count is fetched from MAL and set automatically.
+When `status` is `completed` and `episodes` is omitted, total episode count is fetched
+from MAL and set automatically.
 
 ```json
 // request
@@ -328,64 +317,81 @@ the total episode count is fetched from MAL and set automatically.
 
 ### GET /anime/:id
 
-Returns full anime details from MAL.
-
-```json
-// response (key fields)
-{
-  "id": 1535,
-  "title": "Death Note",
-  "synopsis": "...",
-  "media_type": "tv",
-  "status": "finished_airing",
-  "num_episodes": 37,
-  "mean": 8.62,
-  "rank": 95,
-  "popularity": 2,
-  "rating": "r",
-  "genres": [{ "id": 40, "name": "Psychological" }],
-  "studios": [{ "id": 11, "name": "Madhouse" }],
-  "start_date": "2006-10-04",
-  "end_date": "2007-06-27"
-}
-```
+Returns full anime details from MAL — title, synopsis, genres, themes, demographics,
+rating, studios, scores, rank, popularity, dates.
 
 ### GET /anime/search
 
-Searches MAL. Genre and status filtering is applied client-side after the MAL API response.
-
-| Param    | Example              | Notes                              |
-| -------- | -------------------- | ---------------------------------- |
-| `q`      | `death note`         | Required — forwarded to MAL search |
-| `genre`  | `action`             | Optional — client-side filter      |
-| `status` | `finished_airing`    | Optional — client-side filter      |
-| `type`   | `tv`, `movie`, `ova` | Optional — forwarded to MAL        |
+| Param    | Notes                              |
+| -------- | ---------------------------------- |
+| `q`      | Required — forwarded to MAL search |
+| `genre`  | Optional — client-side filter      |
+| `status` | Optional — client-side filter      |
+| `type`   | Optional — forwarded to MAL        |
 
 ### GET /list
 
-Returns the authenticated user's MAL list with optional filters.
-
-| Param    | Example          | Notes                  |
-| -------- | ---------------- | ---------------------- |
-| `status` | `watching`       | Filter by watch status |
-| `type`   | `tv`             | Filter by media type   |
-| `score`  | `8`              | Minimum score filter   |
-| `sort`   | `title`, `score` | Sort order             |
-
-```json
-// response
-{ "total": 12, "data": [...] }
-```
+| Param    | Notes                  |
+| -------- | ---------------------- |
+| `status` | Filter by watch status |
+| `type`   | Filter by media type   |
+| `score`  | Minimum score filter   |
+| `sort`   | `title` or `score`     |
 
 ### JWT Middleware
 
-All routes except `POST /auth/token` are protected. The middleware:
+All routes except `POST /auth/token` are protected. The middleware validates the
+`Authorization: Bearer` header, checks expiry, and attaches `jwt.MapClaims` to the
+request context. Returns `401` on any failure.
 
-1. Reads `Authorization: Bearer <token>` header
-2. Validates signature using `JWT_SECRET`
-3. Checks expiry
-4. Attaches `jwt.MapClaims` to request context via `context.WithValue`
-5. Returns `401` on any failure — never reaches the handler
+---
+
+## Docker
+
+### Two-Stage Build
+
+```
+Stage 1 — Builder (golang:1.26-alpine)
+  ├── Install gcc + musl-dev (cgo requirement for go-sqlite3)
+  ├── Copy go.mod + go.sum → download dependencies (cached layer)
+  ├── Copy source
+  └── Compile: CGO_ENABLED=1 GOOS=linux -ldflags="-w -s"
+
+Stage 2 — Runtime (alpine:3.19)
+  ├── Install ca-certificates (HTTPS calls to MAL)
+  ├── Copy binary from Stage 1
+  └── CMD ["./server"]
+
+Final image size: ~15MB vs ~300MB single-stage
+```
+
+### Layer Cache Strategy
+
+Dependencies are downloaded in a separate layer from source code:
+
+```dockerfile
+COPY go.mod go.sum ./
+RUN go mod download     ← cached unless dependencies change
+
+COPY . .                ← only this layer re-runs on code changes
+RUN go build ...        ← re-runs on code changes (~4s vs ~44s)
+```
+
+### Volume Mounts
+
+| Host file        | Container path        | Purpose                                     |
+| ---------------- | --------------------- | ------------------------------------------- |
+| `token.json`     | `/app/token.json`     | MAL access token — created by CLI auth flow |
+| `watchlist.json` | `/app/watchlist.json` | Local watchlist — optional for HTTP server  |
+
+`token.json` must exist before `docker compose up`. Run `go run cmd/main.go` once to
+create it via the OAuth2 browser flow. Without it, Docker creates a directory at that
+path instead of a file — the server fails to parse it.
+
+### Environment Injection
+
+Secrets reach the container via `env_file: .env` at runtime — never baked into the
+image. The `.dockerignore` ensures `.env` is excluded from the build context entirely.
 
 ---
 
@@ -405,12 +411,12 @@ All routes except `POST /auth/token` are protected. The middleware:
 
 `https://api.myanimelist.net/v2/`
 
-| Endpoint                     | Method | Purpose                                                   |
-| ---------------------------- | ------ | --------------------------------------------------------- |
-| `/users/@me/animelist`       | GET    | Fetch full anime list with status + episode data          |
-| `/anime/{id}`                | GET    | Full anime details — genres, themes, demographics, rating |
-| `/anime`                     | GET    | Search anime by query + filters                           |
-| `/anime/{id}/my_list_status` | PATCH  | Update a single entry's status and/or episode count       |
+| Endpoint                     | Method | Purpose                        |
+| ---------------------------- | ------ | ------------------------------ |
+| `/users/@me/animelist`       | GET    | Fetch full anime list          |
+| `/anime/{id}`                | GET    | Full anime details             |
+| `/anime`                     | GET    | Search anime                   |
+| `/anime/{id}/my_list_status` | PATCH  | Update entry status + episodes |
 
 ---
 
@@ -447,7 +453,7 @@ Environment variables (`.env`):
 ## Critical Implementation Notes
 
 **MAL forces plain PKCE**
-Setting `code_challenge_method=S256` returns `400 invalid_grant`. `PKCEMethod` is fixed to `plain` — challenge equals verifier.
+`PKCEMethod` is fixed to `plain` — challenge equals verifier. `S256` returns `400 invalid_grant`.
 
 **GET vs PATCH field name asymmetry**
 
@@ -472,26 +478,25 @@ sem <- struct{}{}  // acquire
 ```
 
 **Circular import resolution**
-`auth/` → imports → `token/`. `internal/session/` imports both. No other package imports `session`. The dependency graph is acyclic.
+`auth/` → imports → `token/`. `internal/session/` imports both. No other package imports `session`.
 
 **Variable shadowing — `token` package vs local variable**
-Local variables holding a `token.Token` value use `tok` — not `token` — to avoid shadowing the package name and silently breaking `token.Save()` / `token.Load()` calls.
+Local variables holding a `token.Token` value use `tok` to avoid shadowing the package name.
 
 **Route order in chi**
-Static routes must be registered before parametric routes:
-
-```go
-r.Get("/anime/search", h.SearchAnime)  // registered first
-r.Get("/anime/{id}", h.GetAnime)       // registered second
-```
-
-Reversed order causes `"search"` to be captured as `{id}`.
+Static routes must be registered before parametric routes — `"/anime/search"` before `"/anime/{id}"`.
 
 **`w.Header().Set()` must precede `w.WriteHeader()`**
-Headers are flushed to the client on `WriteHeader`. Any `Header().Set()` call after that is silently ignored.
+Headers are flushed on `WriteHeader`. Calls after that are silently ignored.
 
 **Context key typing**
-`type contextKey string` prevents collisions with other packages using the same string key in `context.WithValue`. `contextKey("claims") != string("claims")` at the type level.
+`type contextKey string` prevents key collisions in `context.WithValue`. `contextKey("claims") != string("claims")`.
+
+**`godotenv.Load()` is non-fatal in the server**
+In Docker, env vars are injected via `env_file` in compose — no `.env` file exists in the container. `godotenv.Load()` is called without error checking in `cmd/server/main.go` so the server starts cleanly in both local and container environments.
+
+**Docker `token.json` volume mount**
+If `token.json` doesn't exist on the host before `docker compose up`, Docker creates it as an empty directory. The server then fails trying to JSON-decode a directory. Always run the CLI auth flow first.
 
 ---
 

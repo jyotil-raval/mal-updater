@@ -158,6 +158,34 @@ curl "http://localhost:8080/list?status=watching&sort=title" \
   -H "Authorization: Bearer <token>"
 ```
 
+### Docker
+
+Authenticate locally first to create `token.json` — the container reads it via volume mount:
+
+```bash
+go run cmd/main.go   # completes OAuth2 flow, creates token.json
+```
+
+Then start the server in Docker:
+
+```bash
+docker compose up
+# → Server running on :8080
+```
+
+Rebuild after code changes:
+
+```bash
+docker compose build
+docker compose up
+```
+
+Stop:
+
+```bash
+docker compose down
+```
+
 ### Bruno (API Collection)
 
 A Bruno collection is included in `bruno/` — open it for a ready-to-use API client with
@@ -174,12 +202,6 @@ brew install --cask bruno
 Set the `local` environment — `base_url` is pre-configured to `http://localhost:8080`.
 Run `Issue Token` once — the token is captured automatically into `{{token}}` for all
 subsequent requests.
-
-### Docker _(coming in Phase 12)_
-
-```bash
-docker compose up
-```
 
 ---
 
@@ -274,8 +296,9 @@ mal-updater/
 ├── watchlist.example.json
 ├── .env                     ← Credentials (gitignored)
 ├── .env.example
-├── Dockerfile               ← Two-stage build (Phase 12)
-├── docker-compose.yml       ← Mount + port config (Phase 12)
+├── .dockerignore            ← Excludes secrets + tooling from Docker build context
+├── Dockerfile               ← Two-stage build — golang:1.26-alpine → alpine:3.19
+├── docker-compose.yml       ← Port binding · env injection · volume mounts
 ├── go.mod
 └── go.sum
 ```
@@ -288,6 +311,7 @@ mal-updater/
 - [`godotenv`](https://github.com/joho/godotenv) — `.env` file loading
 - [`golang-jwt/jwt`](https://github.com/golang-jwt/jwt) — JWT signing + validation
 - [`go-chi/chi`](https://github.com/go-chi/chi) — lightweight HTTP router with URL params
+- [Docker](https://www.docker.com) — two-stage build, ~15MB runtime image
 - [Bruno](https://www.usebruno.com) — API collection (git-friendly, no account required)
 
 ---
@@ -307,7 +331,7 @@ mal-updater/
 | 9     | `--dry-run` CLI flag                                       | ✅     |
 | 10    | Structural refactor — `auth/`, `token/`, `session/`        | ✅     |
 | 11    | HTTP server + JWT middleware + handlers + Bruno collection | ✅     |
-| 12    | Docker — two-stage build + compose                         | 🔜     |
+| 12    | Docker — two-stage build + compose                         | ✅     |
 
 ---
 
