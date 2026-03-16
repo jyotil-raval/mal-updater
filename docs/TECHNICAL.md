@@ -10,6 +10,7 @@
 - [Package Structure](#package-structure)
 - [Architecture](#architecture)
 - [Data Flow](#data-flow)
+- [HTTP API](#http-api)
 - [External Dependencies](#external-dependencies)
 - [Configuration Reference](#configuration-reference)
 - [Critical Implementation Notes](#critical-implementation-notes)
@@ -18,12 +19,12 @@
 
 ## Project Overview
 
-| Field                 | Value                                                                         |
-| --------------------- | ----------------------------------------------------------------------------- |
-| Language              | Go 1.26 · darwin/arm64 (Apple Silicon)                                        |
-| Module                | `github.com/jyotil-raval/mal-updater`                                         |
-| External dependencies | `github.com/joho/godotenv v1.5.1` · `github.com/golang-jwt/jwt/v5` (Phase 11) |
-| Status                | Phase 10 complete — HTTP server + Docker in progress                          |
+| Field                 | Value                                                     |
+| --------------------- | --------------------------------------------------------- |
+| Language              | Go 1.26 · darwin/arm64 (Apple Silicon)                    |
+| Module                | `github.com/jyotil-raval/mal-updater`                     |
+| External dependencies | `godotenv v1.5.1` · `golang-jwt/jwt v5` · `go-chi/chi v5` |
+| Status                | Phase 11 complete — Docker in progress                    |
 
 **Purpose:** CLI tool and HTTP API that synchronises a locally exported HiAnime watchlist with a MyAnimeList (MAL) account. Handles OAuth2 authentication, reads the local watchlist in multiple formats, computes the diff against the current MAL state, and applies required updates concurrently via the MAL REST API. Exposes a JWT-protected REST API consumable as a microservice by Project 2.
 
@@ -36,7 +37,7 @@ mal-updater/
 ├── cmd/
 │   ├── main.go                  # CLI entry point · flags · orchestration
 │   └── server/
-│       └── main.go              # HTTP server entry point (Phase 11)
+│       └── main.go              # HTTP server entry point
 ├── auth/                        # OAuth2 + PKCE — public package
 │   ├── pkce.go                  # PKCE pair generation (plain method)
 │   ├── callback.go              # Temporary HTTP server for OAuth2 callback
@@ -60,18 +61,27 @@ mal-updater/
 │   ├── updater/
 │   │   ├── patch.go             # Single-entry PATCH call
 │   │   └── batch.go             # Concurrent batch runner · Semaphore + WaitGroup
-│   └── server/                  # HTTP router, middleware, handlers (Phase 11)
-│       ├── router.go
+│   └── server/
+│       ├── router.go            # Chi router · route registration · middleware wiring
 │       ├── middleware/
-│       │   └── jwt.go
+│       │   └── jwt.go           # JWT validation · attaches claims to context
 │       └── handlers/
-│           ├── auth.go
-│           ├── sync.go
-│           ├── anime.go
-│           ├── list.go
-│           └── update.go
+│           ├── handlers.go      # Handlers struct · writeJSON · writeError helpers
+│           ├── auth.go          # POST /auth/token
+│           ├── sync.go          # POST /sync
+│           ├── anime.go         # GET /anime/:id · GET /anime/search
+│           ├── list.go          # GET /list
+│           └── update.go        # PATCH /anime/:id
+├── bruno/                       # Bruno API collection — git-friendly, no account needed
+│   ├── auth/
+│   ├── anime/
+│   ├── list/
+│   ├── sync/
+│   ├── update/
+│   └── environments/
+│       └── local.yml
 ├── docs/
-├── watchlist.json               # gitignored — local HiAnime export
+├── watchlist.json               # gitignored
 ├── watchlist.example.json
 ├── .env                         # gitignored
 ├── .env.example
@@ -88,7 +98,7 @@ mal-updater/
 | Package              | Key Files                                    | Responsibility                                                                  |
 | -------------------- | -------------------------------------------- | ------------------------------------------------------------------------------- |
 | `cmd/main.go`        | `main.go`                                    | CLI entry point · `--dry-run` flag · orchestration                              |
-| `cmd/server/main.go` | `main.go`                                    | HTTP server entry point · port binding (Phase 11)                               |
+| `cmd/server/main.go` | `main.go`                                    | HTTP server entry point · port binding · router wiring                          |
 | `auth/`              | `pkce, callback, browser, exchange, refresh` | Full OAuth2 PKCE flow · public package                                          |
 | `token/`             | `token.go`                                   | Token struct · Save/Load to disk · expiry check (5-min buffer) · public package |
 | `internal/session`   | `session.go`                                 | Token lifecycle orchestration — loads, refreshes, or re-authenticates           |
@@ -96,11 +106,11 @@ mal-updater/
 | `internal/mal`       | `types.go, client.go`                        | MAL API client · offset pagination · typed response structs                     |
 | `internal/diff`      | `types.go, loader.go, engine.go`             | Format detection · watchlist parsing · status diff computation                  |
 | `internal/updater`   | `patch.go, batch.go`                         | Single-entry PATCH · concurrent batch runner · semaphore + WaitGroup            |
-| `internal/server`    | `router, middleware, handlers`               | HTTP routing · JWT validation · request handlers (Phase 11)                     |
+| `internal/server`    | `router, middleware, handlers`               | Chi router · JWT middleware · all HTTP handlers                                 |
 
 ### Why `auth/` and `token/` are public packages
 
-Both packages are outside `internal/` so they can be imported by `media-shelf` (Project 2) as an external module dependency. `internal/` enforces a compile-time boundary — packages inside it are invisible to code outside the module. Moving auth and token out makes them reusable across projects.
+Both packages are outside `internal/` so they can be imported by `media-shelf` (Project 2) as an external module dependency. `internal/` enforces a compile-time boundary — packages inside it are invisible to code outside the module.
 
 ### Why `internal/session/` exists
 
@@ -127,42 +137,42 @@ token → imports → auth        ❌ circular
 └─────────┼─────────────────┼─────────────────┼────────────────────────┘
           │                 │                 │
           ▼                 ▼                 ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│   cmd/main.go                   cmd/server/main.go  (Phase 11)      │
-│   CLI · --dry-run               HTTP Server · JWT · Handlers        │
-└──────┬──────────────────────────────────┬───────────────────────────┘
-       │                                  │
-       └──────────────┬───────────────────┘
-                      ▼
-          ┌───────────────────────┐
-          │  internal/session     │
-          │  LoadOrRefresh()      │
-          └────┬─────────────┬────┘
-               │             │
-               ▼             ▼
-          ┌─────────┐   ┌──────────┐
-          │  auth/  │   │  token/  │
-          │  PKCE   │   │  CRUD    │
-          │  OAuth2 │   │  Expiry  │
-          └─────────┘   └──────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│   cmd/main.go                      cmd/server/main.go                │
+│   CLI · --dry-run                  HTTP Server · :8080               │
+└──────┬─────────────────────────────────────┬─────────────────────────┘
+       │                                     │
+       └──────────────────┬──────────────────┘
+                          ▼
+             ┌─────────────────────────┐
+             │    internal/session     │
+             │    LoadOrRefresh()      │
+             └──────┬──────────────┬───┘
+                    │              │
+                    ▼              ▼
+               ┌─────────┐   ┌──────────┐
+               │  auth/  │   │  token/  │
+               │  PKCE   │   │  CRUD    │
+               │  OAuth2 │   │  Expiry  │
+               └─────────┘   └──────────┘
 
-       ┌────────────┐  ┌──────────────┐  ┌─────────────┐
-       │  internal  │  │   internal   │  │  internal   │
-       │  /config   │  │   /diff      │  │  /mal       │
-       │            │  │              │  │             │
-       │ Constants  │  │ Loader       │  │ API Client  │
-       │ Endpoints  │  │ Engine       │  │ Pagination  │
-       └────────────┘  └──────┬───────┘  └──────┬──────┘
-                              │                 │
-                              ▼                 ▼
-                       ┌─────────────┐   ┌─────────────┐
-                       │  internal   │   │  External   │
-                       │  /updater   │   │  MAL APIs   │
-                       │             │   │             │
-                       │ Patch       │   │ OAuth2      │
-                       │ Batch       │   │ REST API    │
-                       │ Semaphore   │   └─────────────┘
-                       └─────────────┘
+  ┌────────────┐  ┌──────────────┐  ┌─────────────┐  ┌─────────────────┐
+  │  internal  │  │   internal   │  │  internal   │  │    internal     │
+  │  /config   │  │   /diff      │  │  /mal       │  │    /server      │
+  │            │  │              │  │             │  │                 │
+  │ Constants  │  │ Loader       │  │ API Client  │  │ Router          │
+  │ Endpoints  │  │ Engine       │  │ Pagination  │  │ JWT Middleware  │
+  └────────────┘  └──────┬───────┘  └──────┬──────┘  │ Handlers        │
+                         │                 │         └────────┬────────┘
+                         ▼                 ▼                  │
+                  ┌─────────────┐   ┌─────────────┐           │
+                  │  internal   │   │  External   │           │
+                  │  /updater   │   │  MAL APIs   │◄──────────┘
+                  │             │   │             │
+                  │ Patch       │   │ OAuth2      │
+                  │ Batch       │   │ REST API    │
+                  │ Semaphore   │   └─────────────┘
+                  └─────────────┘
 ```
 
 ---
@@ -199,56 +209,55 @@ token → imports → auth        ❌ circular
 │  3 · Fetch MAL Anime List                            │
 │                                                      │
 │  GET /users/@me/animelist                            │
-│  fields: list_status, num_episodes                   │
+│  fields: list_status, num_episodes, media_type       │
 │  Paginated (limit=1000, offset-based)                │
 │  → []mal.ListEntry                                   │
 └──────────────────────┬───────────────────────────────┘
                        │
                        ▼
 ┌──────────────────────────────────────────────────────┐
-│  4 · Load Local Watchlist  (CLI only)                │
+│  4 · Load Watchlist                                  │
 │                                                      │
-│  diff.LoadWatchlist("watchlist.json")                │
+│  CLI:  diff.LoadWatchlist("watchlist.json")          │
+│        First byte == '[' ──► loadFlatArray()         │
+│        First byte == '{' ──► loadCategorized()       │
 │                                                      │
-│  First byte == '['  ──► loadFlatArray()              │
-│  First byte == '{'  ──► loadCategorized()            │
+│  HTTP: watchlist in POST /sync request body          │
 │                                                      │
 │  Both paths → []diff.WatchlistEntry                  │
-│                                                      │
-│  HTTP: watchlist supplied in POST /sync request body │
 └──────────────────────┬───────────────────────────────┘
                        │
                        ▼
-┌─────────────────────────────────────────────────────┐
-│  5 · Compare (Diff Engine)                          │
-│                                                     │
-│  Build map[animeID]mal.ListEntry from MAL data      │
-│  For each local entry:                              │
-│    · Status mismatch?        → queue update         │
-│    · Status == completed &&  → set episodes to      │
-│      mal.NumEpisodes > 0       series total         │
-│                                                     │
-│  → []diff.Update  (N entries requiring change)      │
-└──────────────────────┬──────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│  5 · Compare (Diff Engine)                           │
+│                                                      │
+│  Build map[animeID]mal.ListEntry from MAL data       │
+│  For each local entry:                               │
+│    · Status mismatch?        → queue update          │
+│    · Status == completed &&  → set episodes to       │
+│      mal.NumEpisodes > 0       series total          │
+│                                                      │
+│  → []diff.Update  (N entries requiring change)       │
+└──────────────────────┬───────────────────────────────┘
                        │
                        ▼
               ┌────────┴────────┐
               │  updates == 0?  │
-              └────┬──────┬─────┘
+              └────┬────────┬───┘
                   YES      NO
                    │        │
                    ▼        ▼
-           ┌──────────┐  ┌───────────────────┐
-           │ Already  │  │  --dry-run set?   │
-           │ in sync  │  └────┬─────────┬────┘
-           │ Exit     │      YES       NO
-           └──────────┘       │         │
-                              ▼         ▼
+           ┌──────────┐  ┌─────────────────┐
+           │ Already  │  │  dry_run set?   │
+           │ in sync  │  └────┬────────┬───┘
+           │ Exit     │      YES      NO
+           └──────────┘       │        │
+                              ▼        ▼
                     ┌─────────────┐ ┌──────────────────────────────────┐
-                    │ Print each  │ │  7 · Batch PATCH (Concurrent)    │
+                    │ Return/print│ │  7 · Batch PATCH (Concurrent)    │
                     │ planned     │ │                                  │
-                    │ update      │ │  ApplyUpdates(updates, token)    │
-                    │ Exit        │ │  Goroutine per update            │
+                    │ updates     │ │  ApplyUpdates(updates, token)    │
+                    │             │ │  Goroutine per update            │
                     └─────────────┘ │  Buffered channel semaphore (3)  │
                                     │  sync.WaitGroup + sync.Mutex     │
                                     │                                  │
@@ -258,47 +267,125 @@ token → imports → auth        ❌ circular
                                                    ▼
                                     ┌──────────────────────────────────┐
                                     │  Done                            │
-                                    │  N succeeded · M failed · Exit   │
+                                    │  N succeeded · M failed          │
                                     └──────────────────────────────────┘
 ```
 
-### Step-by-Step Description
-
-**1 · Entry Point**
-CLI: `flag.Parse()` reads `--dry-run`. Server: binds to `SERVER_PORT`. Both load `.env` and validate `MAL_CLIENT_ID` and `MAL_REDIRECT_URI`.
-
-**2 · Token Lifecycle**
-`session.LoadOrRefresh()` handles three paths — valid token, expired token (silent refresh), no token (full PKCE browser flow). Both CLI and server call this single function.
-
-**3 · Fetch MAL Anime List**
-`mal.GetAnimeList()` pages through `/users/@me/animelist` using offset-based pagination with `limit=1000`. Requests `fields=list_status,num_episodes`.
-
-**4 · Load Local Watchlist**
-CLI reads `watchlist.json` — format auto-detected by first byte (`[` vs `{`). HTTP server receives watchlist in the `POST /sync` request body.
-
-**5 · Compare (Diff Engine)**
-`diff.Compare()` builds a `map[int]mal.ListEntry` keyed by anime ID. Queues updates for status mismatches. Auto-fills episodes to series total for completed titles.
-
-**6 · Decision Branch**
-Zero updates → exit. Dry run → print and exit. Otherwise → batch updater.
-
-**7 · Concurrent Batch PATCH**
-`updater.ApplyUpdates()` — one goroutine per update, buffered channel semaphore (cap 3), `sync.WaitGroup` + `sync.Mutex`.
-
 ---
 
-## HTTP API _(Phase 11)_
+## HTTP API
 
-| Method  | Endpoint        | Auth | Description                                            |
-| ------- | --------------- | ---- | ------------------------------------------------------ |
-| `POST`  | `/auth/token`   | None | Issue a JWT token                                      |
-| `POST`  | `/sync`         | JWT  | Full watchlist diff + apply                            |
-| `PATCH` | `/anime/:id`    | JWT  | Update single entry — auto-fills episodes on completed |
-| `GET`   | `/anime/:id`    | JWT  | Full anime details from MAL                            |
-| `GET`   | `/anime/search` | JWT  | Search MAL + filter local list                         |
-| `GET`   | `/list`         | JWT  | User's MAL list with filters                           |
+All protected routes require `Authorization: Bearer <token>` header.
+Token is issued by `POST /auth/token` — valid for 24 hours, signed with `HS256`.
 
-> Full handler documentation will be added when Phase 11 is complete.
+### POST /auth/token
+
+No auth required. Issues a signed JWT.
+
+```json
+// response
+{
+  "token": "eyJhbGci...",
+  "expires_in": 86400
+}
+```
+
+### POST /sync
+
+Diffs the supplied watchlist against MAL and applies updates.
+
+```json
+// request
+{
+  "watchlist": [
+    { "mal_id": 1535, "watchListType": 5 },
+    { "mal_id": 16498, "watchListType": 1 }
+  ],
+  "dry_run": false
+}
+
+// response
+{
+  "total": 2,
+  "succeeded": 2,
+  "failed": 0,
+  "dry_run": false
+}
+```
+
+### PATCH /anime/:id
+
+Updates a single MAL entry. When `status` is `completed` and `episodes` is not supplied,
+the total episode count is fetched from MAL and set automatically.
+
+```json
+// request
+{ "status": "completed" }
+
+// response
+{ "id": 1535, "updated": true, "episodes_set": 37 }
+```
+
+### GET /anime/:id
+
+Returns full anime details from MAL.
+
+```json
+// response (key fields)
+{
+  "id": 1535,
+  "title": "Death Note",
+  "synopsis": "...",
+  "media_type": "tv",
+  "status": "finished_airing",
+  "num_episodes": 37,
+  "mean": 8.62,
+  "rank": 95,
+  "popularity": 2,
+  "rating": "r",
+  "genres": [{ "id": 40, "name": "Psychological" }],
+  "studios": [{ "id": 11, "name": "Madhouse" }],
+  "start_date": "2006-10-04",
+  "end_date": "2007-06-27"
+}
+```
+
+### GET /anime/search
+
+Searches MAL. Genre and status filtering is applied client-side after the MAL API response.
+
+| Param    | Example              | Notes                              |
+| -------- | -------------------- | ---------------------------------- |
+| `q`      | `death note`         | Required — forwarded to MAL search |
+| `genre`  | `action`             | Optional — client-side filter      |
+| `status` | `finished_airing`    | Optional — client-side filter      |
+| `type`   | `tv`, `movie`, `ova` | Optional — forwarded to MAL        |
+
+### GET /list
+
+Returns the authenticated user's MAL list with optional filters.
+
+| Param    | Example          | Notes                  |
+| -------- | ---------------- | ---------------------- |
+| `status` | `watching`       | Filter by watch status |
+| `type`   | `tv`             | Filter by media type   |
+| `score`  | `8`              | Minimum score filter   |
+| `sort`   | `title`, `score` | Sort order             |
+
+```json
+// response
+{ "total": 12, "data": [...] }
+```
+
+### JWT Middleware
+
+All routes except `POST /auth/token` are protected. The middleware:
+
+1. Reads `Authorization: Bearer <token>` header
+2. Validates signature using `JWT_SECRET`
+3. Checks expiry
+4. Attaches `jwt.MapClaims` to request context via `context.WithValue`
+5. Returns `401` on any failure — never reaches the handler
 
 ---
 
@@ -348,49 +435,63 @@ All constants live in `internal/config/constants.go`.
 
 Environment variables (`.env`):
 
-| Variable           | Purpose                                  |
-| ------------------ | ---------------------------------------- |
-| `MAL_CLIENT_ID`    | MAL API client ID                        |
-| `MAL_REDIRECT_URI` | OAuth2 callback URL                      |
-| `JWT_SECRET`       | Signing secret for JWT tokens (Phase 11) |
-| `SERVER_PORT`      | HTTP server port (Phase 11)              |
+| Variable           | Purpose                          |
+| ------------------ | -------------------------------- |
+| `MAL_CLIENT_ID`    | MAL API client ID                |
+| `MAL_REDIRECT_URI` | OAuth2 callback URL              |
+| `JWT_SECRET`       | Signing secret for JWT tokens    |
+| `SERVER_PORT`      | HTTP server port (default: 8080) |
 
 ---
 
 ## Critical Implementation Notes
 
 **MAL forces plain PKCE**
-Setting `code_challenge_method=S256` returns `400 invalid_grant: Failed to verify code_verifier`. `PKCEMethod` is fixed to `plain` — challenge equals verifier.
+Setting `code_challenge_method=S256` returns `400 invalid_grant`. `PKCEMethod` is fixed to `plain` — challenge equals verifier.
 
 **GET vs PATCH field name asymmetry**
-The MAL API uses different field names for reading and writing episode counts:
 
 - GET response → `num_episodes_watched`
 - PATCH body → `num_watched_episodes`
 
-**Episode count logic**
-Episodes are never read from `watchlist.json` — HiAnime exports carry no episode data. For `completed` titles, MAL's own `num_episodes` is used as the target. The same rule applies to `PATCH /anime/:id` — sending `status: completed` auto-fills episodes from MAL's total.
+**Episode auto-fill on completed**
+`PATCH /anime/:id` with `status: completed` fetches `num_episodes` from MAL and sets it automatically. Same rule applies in the diff engine for CLI sync.
 
 **Token expiry buffer**
-`token.IsExpired()` returns `true` 5 minutes before actual expiry to avoid races on token use mid-request.
+`token.IsExpired()` returns `true` 5 minutes before actual expiry.
 
 **Token file permissions**
-`token.json` is written with `0600` (owner read/write only).
+`token.json` written with `0600` (owner read/write only).
 
 **Semaphore via buffered channel**
 
 ```go
 sem := make(chan struct{}, MALUpdateConcurrency) // capacity = 3
 sem <- struct{}{}  // acquire
-// ... HTTP call ...
 <-sem              // release
 ```
 
 **Circular import resolution**
-`auth/` imports `token/`. `token/` imports nothing internal. `internal/session/` imports both — it is the only package allowed to orchestrate them together. No other package imports `session`.
+`auth/` → imports → `token/`. `internal/session/` imports both. No other package imports `session`. The dependency graph is acyclic.
 
-**Variable shadowing — `token` package vs `token` variable**
-The package is named `token`. Local variables that hold a `token.Token` value must use a different name (e.g. `tok`) to avoid shadowing the package name and breaking subsequent `token.Save()` / `token.Load()` calls.
+**Variable shadowing — `token` package vs local variable**
+Local variables holding a `token.Token` value use `tok` — not `token` — to avoid shadowing the package name and silently breaking `token.Save()` / `token.Load()` calls.
+
+**Route order in chi**
+Static routes must be registered before parametric routes:
+
+```go
+r.Get("/anime/search", h.SearchAnime)  // registered first
+r.Get("/anime/{id}", h.GetAnime)       // registered second
+```
+
+Reversed order causes `"search"` to be captured as `{id}`.
+
+**`w.Header().Set()` must precede `w.WriteHeader()`**
+Headers are flushed to the client on `WriteHeader`. Any `Header().Set()` call after that is silently ignored.
+
+**Context key typing**
+`type contextKey string` prevents collisions with other packages using the same string key in `context.WithValue`. `contextKey("claims") != string("claims")` at the type level.
 
 ---
 

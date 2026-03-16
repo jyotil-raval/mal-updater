@@ -15,7 +15,7 @@ No manual MAL updates. No full list replacements. Just the delta.
 **Two modes:**
 
 - **CLI** — run locally, sync on demand
-- **HTTP Server** — expose a JWT-protected REST API, consumable as a microservice
+- **HTTP Server** — JWT-protected REST API, consumable as a microservice
 
 ---
 
@@ -88,13 +88,13 @@ go mod tidy
 ### Configure
 
 ```bash
-cp .env.example.env
+cp .env.example .env
 ```
 
 Open `.env` and fill in your credentials:
 
 ```env
-MAL_CLIENT_ID=<your_client_id_here>
+MAL_CLIENT_ID=your_client_id_here
 MAL_REDIRECT_URI=http://localhost:8080/callback
 JWT_SECRET=your_secret_key_here
 SERVER_PORT=8080
@@ -122,10 +122,11 @@ go run cmd/main.go --dry-run
 On first run, a browser window opens for MAL authentication.
 Subsequent runs use the cached token silently.
 
-### HTTP Server _(coming in Phase 11)_
+### HTTP Server
 
 ```bash
 go run cmd/server/main.go
+# → Server running on :8080
 ```
 
 ```bash
@@ -136,9 +137,9 @@ curl -X POST http://localhost:8080/auth/token
 curl -X POST http://localhost:8080/sync \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"watchlist": [{"mal_id": 1535, "watchListType": 5}]}'
+  -d '{"watchlist": [{"mal_id": 1535, "watchListType": 5}], "dry_run": false}'
 
-# Update single entry
+# Update single entry — episodes auto-filled when status is completed
 curl -X PATCH http://localhost:8080/anime/1535 \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
@@ -149,13 +150,30 @@ curl http://localhost:8080/anime/1535 \
   -H "Authorization: Bearer <token>"
 
 # Search anime
-curl "http://localhost:8080/anime/search?q=naruto&genre=action&status=finished" \
+curl "http://localhost:8080/anime/search?q=naruto&genre=action&status=finished_airing" \
   -H "Authorization: Bearer <token>"
 
 # Filter your list
 curl "http://localhost:8080/list?status=watching&sort=title" \
   -H "Authorization: Bearer <token>"
 ```
+
+### Bruno (API Collection)
+
+A Bruno collection is included in `bruno/` — open it for a ready-to-use API client with
+all endpoints pre-configured and token auto-capture on `Issue Token`.
+
+```bash
+# Install Bruno
+brew install --cask bruno
+
+# Open collection
+# File → Open Collection → select the bruno/ folder
+```
+
+Set the `local` environment — `base_url` is pre-configured to `http://localhost:8080`.
+Run `Issue Token` once — the token is captured automatically into `{{token}}` for all
+subsequent requests.
 
 ### Docker _(coming in Phase 12)_
 
@@ -165,16 +183,48 @@ docker compose up
 
 ---
 
-## API Reference _(coming in Phase 11)_
+## API Reference
 
-| Method  | Endpoint        | Auth | Description                                                |
-| ------- | --------------- | ---- | ---------------------------------------------------------- |
-| `POST`  | `/auth/token`   | None | Issue a JWT token                                          |
-| `POST`  | `/sync`         | JWT  | Full watchlist diff + apply                                |
-| `PATCH` | `/anime/:id`    | JWT  | Update single MAL entry — auto-fills episodes on completed |
-| `GET`   | `/anime/:id`    | JWT  | Full anime details from MAL                                |
-| `GET`   | `/anime/search` | JWT  | Search MAL + filter local list                             |
-| `GET`   | `/list`         | JWT  | User's MAL list with filters                               |
+| Method  | Endpoint        | Auth | Description                                                                        |
+| ------- | --------------- | ---- | ---------------------------------------------------------------------------------- |
+| `POST`  | `/auth/token`   | None | Issue a signed JWT token (24hr expiry)                                             |
+| `POST`  | `/sync`         | JWT  | Diff watchlist against MAL + apply updates · supports `dry_run`                    |
+| `PATCH` | `/anime/:id`    | JWT  | Update single entry · auto-fills episodes when `status: completed`                 |
+| `GET`   | `/anime/:id`    | JWT  | Full anime details — title, synopsis, genres, themes, rating, studios              |
+| `GET`   | `/anime/search` | JWT  | Search MAL by `q` · filter by `genre`, `status`, `type`                            |
+| `GET`   | `/list`         | JWT  | User's MAL list · filter by `status`, `type`, `score` · sort by `title` or `score` |
+
+### Request / Response Examples
+
+**POST /sync**
+
+```json
+// request
+{ "watchlist": [{ "mal_id": 1535, "watchListType": 5 }], "dry_run": true }
+
+// response
+{ "total": 1, "succeeded": 0, "failed": 0, "dry_run": true }
+```
+
+**PATCH /anime/:id**
+
+```json
+// request
+{ "status": "completed" }
+
+// response — episodes auto-filled from MAL's total
+{ "id": 1535, "updated": true, "episodes_set": 37 }
+```
+
+**GET /list**
+
+```
+GET /list?status=watching&sort=title&score=7
+```
+
+```json
+{ "total": 12, "data": [...] }
+```
 
 ---
 
@@ -185,14 +235,14 @@ mal-updater/
 ├── cmd/
 │   ├── main.go              ← CLI entry point
 │   └── server/
-│       └── main.go          ← HTTP server entry point (Phase 11)
+│       └── main.go          ← HTTP server entry point
 ├── auth/                    ← OAuth2 + PKCE — public package
 │   ├── pkce.go
 │   ├── callback.go
 │   ├── browser.go
 │   ├── exchange.go
 │   └── refresh.go
-├── token/                   ← Token struct, Save, Load, IsExpired
+├── token/                   ← Token struct · Save · Load · IsExpired
 │   └── token.go
 ├── internal/
 │   ├── config/              ← Constants — endpoints, ports, concurrency caps
@@ -200,12 +250,30 @@ mal-updater/
 │   ├── diff/                ← Watchlist loader + diff engine
 │   ├── mal/                 ← MAL v2 API client + pagination
 │   ├── updater/             ← Concurrent batch PATCH
-│   └── server/              ← HTTP router, middleware, handlers (Phase 11)
+│   └── server/              ← HTTP router, middleware, handlers
+│       ├── router.go
+│       ├── middleware/
+│       │   └── jwt.go
+│       └── handlers/
+│           ├── handlers.go  ← Handlers struct + shared helpers
+│           ├── auth.go      ← POST /auth/token
+│           ├── sync.go      ← POST /sync
+│           ├── anime.go     ← GET /anime/:id · GET /anime/search
+│           ├── list.go      ← GET /list
+│           └── update.go    ← PATCH /anime/:id
+├── bruno/                   ← Bruno API collection
+│   ├── auth/
+│   ├── anime/
+│   ├── list/
+│   ├── sync/
+│   ├── update/
+│   └── environments/
+│       └── local.yml
 ├── docs/                    ← Technical documentation
 ├── watchlist.json           ← Your watchlist (gitignored)
-├── watchlist.example.json   ← Format reference
+├── watchlist.example.json
 ├── .env                     ← Credentials (gitignored)
-├── .env.example             ← Credential template
+├── .env.example
 ├── Dockerfile               ← Two-stage build (Phase 12)
 ├── docker-compose.yml       ← Mount + port config (Phase 12)
 ├── go.mod
@@ -218,26 +286,28 @@ mal-updater/
 
 - Go standard library — `net/http`, `crypto/rand`, `encoding/json`, `sync`, `flag`
 - [`godotenv`](https://github.com/joho/godotenv) — `.env` file loading
-- [`golang-jwt/jwt`](https://github.com/golang-jwt/jwt) — JWT auth (Phase 11)
+- [`golang-jwt/jwt`](https://github.com/golang-jwt/jwt) — JWT signing + validation
+- [`go-chi/chi`](https://github.com/go-chi/chi) — lightweight HTTP router with URL params
+- [Bruno](https://www.usebruno.com) — API collection (git-friendly, no account required)
 
 ---
 
 ## Phase Progress
 
-| Phase | Description                                         | Status |
-| ----- | --------------------------------------------------- | ------ |
-| 1     | Environment setup + PKCE generation                 | ✅     |
-| 2     | OAuth2 callback server                              | ✅     |
-| 3     | Token exchange + storage                            | ✅     |
-| 4     | MAL API client + pagination                         | ✅     |
-| 5     | Watchlist loader (multi-format)                     | ✅     |
-| 6     | Diff engine                                         | ✅     |
-| 7     | Concurrent batch updater                            | ✅     |
-| 8     | Silent token refresh                                | ✅     |
-| 9     | `--dry-run` CLI flag                                | ✅     |
-| 10    | Structural refactor — `auth/`, `token/`, `session/` | ✅     |
-| 11    | HTTP server + JWT middleware + handlers             | 🔜     |
-| 12    | Docker — two-stage build + compose                  | 🔜     |
+| Phase | Description                                                | Status |
+| ----- | ---------------------------------------------------------- | ------ |
+| 1     | Environment setup + PKCE generation                        | ✅     |
+| 2     | OAuth2 callback server                                     | ✅     |
+| 3     | Token exchange + storage                                   | ✅     |
+| 4     | MAL API client + pagination                                | ✅     |
+| 5     | Watchlist loader (multi-format)                            | ✅     |
+| 6     | Diff engine                                                | ✅     |
+| 7     | Concurrent batch updater                                   | ✅     |
+| 8     | Silent token refresh                                       | ✅     |
+| 9     | `--dry-run` CLI flag                                       | ✅     |
+| 10    | Structural refactor — `auth/`, `token/`, `session/`        | ✅     |
+| 11    | HTTP server + JWT middleware + handlers + Bruno collection | ✅     |
+| 12    | Docker — two-stage build + compose                         | 🔜     |
 
 ---
 
