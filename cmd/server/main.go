@@ -13,9 +13,7 @@ import (
 )
 
 func main() {
-	if err := godotenv.Load(); err != nil {
-		log.Fatal("Error loading .env file")
-	}
+	godotenv.Load()
 
 	if os.Getenv("MAL_CLIENT_ID") == "" {
 		log.Fatal("MAL_CLIENT_ID is not set in .env")

@@ -1,0 +1,28 @@
+# .dockerignore
+
+# Secrets and local state — never in the image
+.env
+token.json
+watchlist.json
+
+# Git
+.git
+.gitignore
+
+# Go build cache
+*.test
+*.out
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode
+.idea
+
+# Docs and tooling — not needed in the image
+docs/
+bruno/
+README.md
+TECHNICAL.md

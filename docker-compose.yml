@@ -1,0 +1,12 @@
+# docker-compose.yml
+services:
+  mal-updater:
+    build: .
+    ports:
+      - '${SERVER_PORT:-8080}:8080'
+    env_file:
+      - .env
+    volumes:
+      - ./token.json:/app/token.json
+      - ./watchlist.json:/app/watchlist.json
+    restart: unless-stopped
