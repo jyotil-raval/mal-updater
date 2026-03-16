@@ -50,9 +50,9 @@ Your CLI                    Browser                   MAL Auth Server
     |   (plain method)         |                             |
     |                          |                             |
     |-- Open auth URL -------->|                             |
-    |   (with code_challenge)  |-- User logs in ----------->|
+    |   (with code_challenge)  |-- User logs in ------------>|
     |                          |<-- Redirect to localhost ---|
-    |                          |    ?code=XXXX              |
+    |                          |    ?code=XXXX               |
     |<-- Capture code ---------|                             |
     |   (local HTTP server)    |                             |
     |                          |                             |
