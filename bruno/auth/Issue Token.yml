@@ -1,0 +1,22 @@
+info:
+  name: Issue Token
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{base_url}}/auth/token"
+  auth: inherit
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        const token = res.getBody().token;
+        bru.setEnvVar("token", token);
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
