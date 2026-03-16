@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/jyotil-raval/mal-updater/internal/config"
-	"github.com/jyotil-raval/mal-updater/internal/store"
+	"github.com/jyotil-raval/mal-updater/token"
 )
 
 // RefreshToken exchanges a refresh token for a new access token.
 // Returns a new Token on success, or an error if the refresh token
 // has expired — caller should fall back to full re-authentication.
-func RefreshToken(clientID, refreshToken string) (store.Token, error) {
+func RefreshToken(clientID, refreshToken string) (token.Token, error) {
 	form := url.Values{}
 	form.Set("client_id", clientID)
 	form.Set("grant_type", config.GrantTypeRefresh)
@@ -23,13 +23,13 @@ func RefreshToken(clientID, refreshToken string) (store.Token, error) {
 
 	resp, err := http.PostForm(config.MALTokenURL, form)
 	if err != nil {
-		return store.Token{}, fmt.Errorf("refresh request failed: %w", err)
+		return token.Token{}, fmt.Errorf("refresh request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return store.Token{}, fmt.Errorf("refresh failed with status %d: %s",
+		return token.Token{}, fmt.Errorf("refresh failed with status %d: %s",
 			resp.StatusCode, string(body))
 	}
 
@@ -41,10 +41,10 @@ func RefreshToken(clientID, refreshToken string) (store.Token, error) {
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return store.Token{}, fmt.Errorf("decoding refresh response: %w", err)
+		return token.Token{}, fmt.Errorf("decoding refresh response: %w", err)
 	}
 
-	return store.Token{
+	return token.Token{
 		AccessToken:  raw.AccessToken,
 		RefreshToken: raw.RefreshToken,
 		TokenType:    raw.TokenType,

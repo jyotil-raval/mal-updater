@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/jyotil-raval/mal-updater/internal/config"
-	"github.com/jyotil-raval/mal-updater/internal/store"
+	"github.com/jyotil-raval/mal-updater/token"
 )
 
 // ExchangeCode sends the authorization code and PKCE verifier to MAL
 // and returns a Token containing access and refresh tokens
-func ExchangeCode(clientID, redirectURI, code, verifier string) (store.Token, error) {
+func ExchangeCode(clientID, redirectURI, code, verifier string) (token.Token, error) {
 	form := url.Values{}
 	form.Set("client_id", clientID)
 	form.Set("grant_type", config.GrantTypeAuth)
@@ -24,13 +24,13 @@ func ExchangeCode(clientID, redirectURI, code, verifier string) (store.Token, er
 
 	resp, err := http.PostForm(config.MALTokenURL, form)
 	if err != nil {
-		return store.Token{}, fmt.Errorf("token exchange request: %w", err)
+		return token.Token{}, fmt.Errorf("token exchange request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return store.Token{}, fmt.Errorf("token exchange failed with status %d: %s", resp.StatusCode, string(body))
+		return token.Token{}, fmt.Errorf("token exchange failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var raw struct {
@@ -41,10 +41,10 @@ func ExchangeCode(clientID, redirectURI, code, verifier string) (store.Token, er
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return store.Token{}, fmt.Errorf("decoding token response: %w", err)
+		return token.Token{}, fmt.Errorf("decoding token response: %w", err)
 	}
 
-	return store.Token{
+	return token.Token{
 		AccessToken:  raw.AccessToken,
 		RefreshToken: raw.RefreshToken,
 		TokenType:    raw.TokenType,
