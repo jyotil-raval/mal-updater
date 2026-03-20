@@ -1,7 +1,10 @@
 # docker-compose.yml
 services:
-  mal-updater:
-    build: .
+  http:
+    build:
+      context: .
+      args:
+        CMD: cmd/server/main.go
     ports:
       - '${SERVER_PORT:-8080}:8080'
     env_file:
@@ -10,3 +13,19 @@ services:
       - ./token.json:/app/token.json
       - ./watchlist.json:/app/watchlist.json
     restart: unless-stopped
+
+  grpc:
+    build:
+      context: .
+      args:
+        CMD: cmd/grpc/main.go
+    ports:
+      - '${GRPC_PORT:-9090}:9090'
+    env_file:
+      - .env
+    volumes:
+      - ./token.json:/app/token.json
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

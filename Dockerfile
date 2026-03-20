@@ -1,5 +1,3 @@
-# Dockerfile
-
 # ── Stage 1: Builder ─────────────────────────────────────────────────
 FROM golang:1.26-alpine AS builder
 
@@ -17,10 +15,11 @@ RUN go mod download
 COPY . .
 
 # Build the server binary — static, no external dependencies
+ARG CMD=cmd/server/main.go
 RUN CGO_ENABLED=1 GOOS=linux go build \
     -ldflags="-w -s" \
-    -o /app/server \
-    ./cmd/server/main.go
+    -o /app/bin \
+    ./${CMD}
 
 # ── Stage 2: Runtime ─────────────────────────────────────────────────
 FROM alpine:3.19
@@ -31,8 +30,8 @@ RUN apk add --no-cache ca-certificates
 WORKDIR /app
 
 # Copy binary from builder
-COPY --from=builder /app/server .
+COPY --from=builder /app/bin .
 
-EXPOSE 8080
+EXPOSE 8080 9090
 
-CMD ["./server"]
+CMD ["./bin"]
