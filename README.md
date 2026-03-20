@@ -6,16 +6,17 @@ Automate MyAnimeList updates from a local watchlist file — built in Go.
 
 ## What It Does
 
-`mal-updater` is a CLI tool and HTTP API that reads your anime watchlist from a local
+`mal-updater` is a CLI tool and HTTP/gRPC API that reads your anime watchlist from a local
 `watchlist.json` file, compares it against your live MyAnimeList account,
 and PATCHes only the entries that differ — concurrently.
 
 No manual MAL updates. No full list replacements. Just the delta.
 
-**Two modes:**
+**Three modes:**
 
 - **CLI** — run locally, sync on demand
-- **HTTP Server** — JWT-protected REST API, consumable as a microservice
+- **HTTP Server** — JWT-protected REST API, consumable via curl or Bruno
+- **gRPC Server** — binary Protocol Buffer API, consumable as a microservice
 
 ---
 
@@ -98,12 +99,12 @@ MAL_CLIENT_ID=your_client_id_here
 MAL_REDIRECT_URI=http://localhost:8080/callback
 JWT_SECRET=your_secret_key_here
 SERVER_PORT=8080
+GRPC_PORT=9090
 ```
 
 ### Add Your Watchlist
 
 Export your watchlist from HiAnime and save it as `watchlist.json` in the project root.
-Use `watchlist.example.json` as a format reference.
 
 ---
 
@@ -112,15 +113,9 @@ Use `watchlist.example.json` as a format reference.
 ### CLI
 
 ```bash
-# Full sync
-go run cmd/main.go
-
-# Preview without applying
-go run cmd/main.go --dry-run
+go run cmd/main.go           # full sync
+go run cmd/main.go --dry-run # preview only
 ```
-
-On first run, a browser window opens for MAL authentication.
-Subsequent runs use the cached token silently.
 
 ### HTTP Server
 
@@ -130,123 +125,74 @@ go run cmd/server/main.go
 ```
 
 ```bash
-# Issue a JWT token
-curl -X POST http://localhost:8080/auth/token
+TOKEN=$(curl -s -X POST http://localhost:8080/auth/token | jq -r .token)
 
-# Sync via API
-curl -X POST http://localhost:8080/sync \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"watchlist": [{"mal_id": 1535, "watchListType": 5}], "dry_run": false}'
+curl http://localhost:8080/anime/1535 -H "Authorization: Bearer $TOKEN"
+curl "http://localhost:8080/list?status=watching" -H "Authorization: Bearer $TOKEN"
+```
 
-# Update single entry — episodes auto-filled when status is completed
-curl -X PATCH http://localhost:8080/anime/1535 \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"status": "completed"}'
+### gRPC Server
 
-# Get anime details
-curl http://localhost:8080/anime/1535 \
-  -H "Authorization: Bearer <token>"
+```bash
+go run cmd/grpc/main.go
+# → gRPC server running on :9090
+```
 
-# Search anime
-curl "http://localhost:8080/anime/search?q=naruto&genre=action&status=finished_airing" \
-  -H "Authorization: Bearer <token>"
+```bash
+# Test with grpcurl
+brew install grpcurl
 
-# Filter your list
-curl "http://localhost:8080/list?status=watching&sort=title" \
-  -H "Authorization: Bearer <token>"
+grpcurl -plaintext localhost:9090 list
+grpcurl -plaintext -d '{"id": "1535"}' localhost:9090 anime.AnimeService/GetAnime
+grpcurl -plaintext -d '{"q": "naruto"}' localhost:9090 anime.AnimeService/Search
+grpcurl -plaintext -d '{"status": "watching"}' localhost:9090 anime.AnimeService/GetList
+```
+
+### Regenerate Proto Code
+
+```bash
+make proto
 ```
 
 ### Docker
 
-Authenticate locally first to create `token.json` — the container reads it via volume mount:
-
 ```bash
-go run cmd/main.go   # completes OAuth2 flow, creates token.json
-```
-
-Then start the server in Docker:
-
-```bash
-docker compose up
-# → Server running on :8080
-```
-
-Rebuild after code changes:
-
-```bash
-docker compose build
-docker compose up
-```
-
-Stop:
-
-```bash
+go run cmd/main.go          # authenticate first — creates token.json
+docker compose up           # start HTTP server
 docker compose down
 ```
 
 ### Bruno (API Collection)
 
-A Bruno collection is included in `bruno/` — open it for a ready-to-use API client with
-all endpoints pre-configured and token auto-capture on `Issue Token`.
-
 ```bash
-# Install Bruno
 brew install --cask bruno
-
-# Open collection
-# File → Open Collection → select the bruno/ folder
+# File → Open Collection → select bruno/ folder
 ```
-
-Set the `local` environment — `base_url` is pre-configured to `http://localhost:8080`.
-Run `Issue Token` once — the token is captured automatically into `{{token}}` for all
-subsequent requests.
 
 ---
 
 ## API Reference
 
-| Method  | Endpoint        | Auth | Description                                                                        |
-| ------- | --------------- | ---- | ---------------------------------------------------------------------------------- |
-| `POST`  | `/auth/token`   | None | Issue a signed JWT token (24hr expiry)                                             |
-| `POST`  | `/sync`         | JWT  | Diff watchlist against MAL + apply updates · supports `dry_run`                    |
-| `PATCH` | `/anime/:id`    | JWT  | Update single entry · auto-fills episodes when `status: completed`                 |
-| `GET`   | `/anime/:id`    | JWT  | Full anime details — title, synopsis, genres, themes, rating, studios              |
-| `GET`   | `/anime/search` | JWT  | Search MAL by `q` · filter by `genre`, `status`, `type`                            |
-| `GET`   | `/list`         | JWT  | User's MAL list · filter by `status`, `type`, `score` · sort by `title` or `score` |
+### HTTP (REST)
 
-### Request / Response Examples
+| Method  | Endpoint        | Auth | Description                                             |
+| ------- | --------------- | ---- | ------------------------------------------------------- |
+| `POST`  | `/auth/token`   | None | Issue a signed JWT token (24hr expiry)                  |
+| `POST`  | `/sync`         | JWT  | Diff watchlist against MAL + apply updates              |
+| `PATCH` | `/anime/:id`    | JWT  | Update single entry · auto-fills episodes on completed  |
+| `GET`   | `/anime/:id`    | JWT  | Full anime details                                      |
+| `GET`   | `/anime/search` | JWT  | Search MAL by `q` · filter by `genre`, `status`, `type` |
+| `GET`   | `/list`         | JWT  | User's MAL list with filters                            |
 
-**POST /sync**
+### gRPC (Protocol Buffers)
 
-```json
-// request
-{ "watchlist": [{ "mal_id": 1535, "watchListType": 5 }], "dry_run": true }
+Service: `anime.AnimeService` · Port: `:9090`
 
-// response
-{ "total": 1, "succeeded": 0, "failed": 0, "dry_run": true }
-```
-
-**PATCH /anime/:id**
-
-```json
-// request
-{ "status": "completed" }
-
-// response — episodes auto-filled from MAL's total
-{ "id": 1535, "updated": true, "episodes_set": 37 }
-```
-
-**GET /list**
-
-```
-GET /list?status=watching&sort=title&score=7
-```
-
-```json
-{ "total": 12, "data": [...] }
-```
+| RPC        | Request                                               | Response              | Description        |
+| ---------- | ----------------------------------------------------- | --------------------- | ------------------ |
+| `GetAnime` | `GetAnimeRequest{id}`                                 | `AnimeResponse`       | Full anime details |
+| `Search`   | `SearchAnimeRequest{q, genre, status, media_type}`    | `SearchAnimeResponse` | Search anime       |
+| `GetList`  | `GetListRequest{status, media_type, sort, min_score}` | `GetListResponse`     | User's MAL list    |
 
 ---
 
@@ -256,49 +202,30 @@ GET /list?status=watching&sort=title&score=7
 mal-updater/
 ├── cmd/
 │   ├── main.go              ← CLI entry point
-│   └── server/
-│       └── main.go          ← HTTP server entry point
+│   ├── server/
+│   │   └── main.go          ← HTTP server entry point (:8080)
+│   └── grpc/
+│       └── main.go          ← gRPC server entry point (:9090)
+├── proto/
+│   ├── anime.proto          ← gRPC contract — source of truth
+│   └── animepb/
+│       ├── anime.pb.go      ← generated message types
+│       └── anime_grpc.pb.go ← generated service + client stub
 ├── auth/                    ← OAuth2 + PKCE — public package
-│   ├── pkce.go
-│   ├── callback.go
-│   ├── browser.go
-│   ├── exchange.go
-│   └── refresh.go
 ├── token/                   ← Token struct · Save · Load · IsExpired
-│   └── token.go
 ├── internal/
-│   ├── config/              ← Constants — endpoints, ports, concurrency caps
-│   ├── session/             ← Token lifecycle orchestration — LoadOrRefresh()
+│   ├── config/
+│   ├── session/             ← Token lifecycle — LoadOrRefresh()
 │   ├── diff/                ← Watchlist loader + diff engine
 │   ├── mal/                 ← MAL v2 API client + pagination
 │   ├── updater/             ← Concurrent batch PATCH
+│   ├── grpc/
+│   │   └── server.go        ← AnimeServer gRPC handler implementation
 │   └── server/              ← HTTP router, middleware, handlers
-│       ├── router.go
-│       ├── middleware/
-│       │   └── jwt.go
-│       └── handlers/
-│           ├── handlers.go  ← Handlers struct + shared helpers
-│           ├── auth.go      ← POST /auth/token
-│           ├── sync.go      ← POST /sync
-│           ├── anime.go     ← GET /anime/:id · GET /anime/search
-│           ├── list.go      ← GET /list
-│           └── update.go    ← PATCH /anime/:id
 ├── bruno/                   ← Bruno API collection
-│   ├── auth/
-│   ├── anime/
-│   ├── list/
-│   ├── sync/
-│   ├── update/
-│   └── environments/
-│       └── local.yml
-├── docs/                    ← Technical documentation
-├── watchlist.json           ← Your watchlist (gitignored)
-├── watchlist.example.json
-├── .env                     ← Credentials (gitignored)
-├── .env.example
-├── .dockerignore            ← Excludes secrets + tooling from Docker build context
-├── Dockerfile               ← Two-stage build — golang:1.26-alpine → alpine:3.19
-├── docker-compose.yml       ← Port binding · env injection · volume mounts
+├── Makefile                 ← make proto
+├── Dockerfile
+├── docker-compose.yml
 ├── go.mod
 └── go.sum
 ```
@@ -310,28 +237,31 @@ mal-updater/
 - Go standard library — `net/http`, `crypto/rand`, `encoding/json`, `sync`, `flag`
 - [`godotenv`](https://github.com/joho/godotenv) — `.env` file loading
 - [`golang-jwt/jwt`](https://github.com/golang-jwt/jwt) — JWT signing + validation
-- [`go-chi/chi`](https://github.com/go-chi/chi) — lightweight HTTP router with URL params
+- [`go-chi/chi`](https://github.com/go-chi/chi) — HTTP router
+- [`google.golang.org/grpc`](https://pkg.go.dev/google.golang.org/grpc) — gRPC framework
+- [`google.golang.org/protobuf`](https://pkg.go.dev/google.golang.org/protobuf) — Protocol Buffers
 - [Docker](https://www.docker.com) — two-stage build, ~15MB runtime image
-- [Bruno](https://www.usebruno.com) — API collection (git-friendly, no account required)
+- [Bruno](https://www.usebruno.com) — HTTP API collection
 
 ---
 
 ## Phase Progress
 
-| Phase | Description                                                | Status |
-| ----- | ---------------------------------------------------------- | ------ |
-| 1     | Environment setup + PKCE generation                        | ✅     |
-| 2     | OAuth2 callback server                                     | ✅     |
-| 3     | Token exchange + storage                                   | ✅     |
-| 4     | MAL API client + pagination                                | ✅     |
-| 5     | Watchlist loader (multi-format)                            | ✅     |
-| 6     | Diff engine                                                | ✅     |
-| 7     | Concurrent batch updater                                   | ✅     |
-| 8     | Silent token refresh                                       | ✅     |
-| 9     | `--dry-run` CLI flag                                       | ✅     |
-| 10    | Structural refactor — `auth/`, `token/`, `session/`        | ✅     |
-| 11    | HTTP server + JWT middleware + handlers + Bruno collection | ✅     |
-| 12    | Docker — two-stage build + compose                         | ✅     |
+| Phase | Description                                         | Status |
+| ----- | --------------------------------------------------- | ------ |
+| 1     | Environment setup + PKCE generation                 | ✅     |
+| 2     | OAuth2 callback server                              | ✅     |
+| 3     | Token exchange + storage                            | ✅     |
+| 4     | MAL API client + pagination                         | ✅     |
+| 5     | Watchlist loader (multi-format)                     | ✅     |
+| 6     | Diff engine                                         | ✅     |
+| 7     | Concurrent batch updater                            | ✅     |
+| 8     | Silent token refresh                                | ✅     |
+| 9     | `--dry-run` CLI flag                                | ✅     |
+| 10    | Structural refactor — `auth/`, `token/`, `session/` | ✅     |
+| 11    | HTTP server + JWT middleware + handlers + Bruno     | ✅     |
+| 12    | Docker — two-stage build + compose                  | ✅     |
+| 13    | gRPC server — proto contract + AnimeService         | ✅     |
 
 ---
 
