@@ -9,6 +9,15 @@ http:
   headers:
     - name: Authorization
       value: Bearer {{token}}
+  body:
+    type: json
+    data: |-
+      {
+        "watchlist": [
+          { "mal_id": 57181, "watchListType": 1 }
+        ],
+        "dry_run": false
+      }
   auth: inherit
 
 settings:

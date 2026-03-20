@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package anime;
+
+option go_package = "github.com/jyotil-raval/mal-updater/proto/animepb;animepb";
+
+
+// ── Messages ─────────────────────────────────────────────────────────────────
+
+message GetAnimeRequest {
+  string id = 1;
+}
+
+message AnimeResponse {
+  string id           = 1;
+  string title        = 2;
+  string synopsis     = 3;
+  string media_type   = 4;
+  string status       = 5;
+  int32  num_episodes = 6;
+  string start_date   = 7;
+  string end_date     = 8;
+  double mean_score   = 9;
+  int32  rank         = 10;
+  int32  popularity   = 11;
+  string rating       = 12;
+  repeated Genre      genres       = 13;
+  repeated Studio     studios      = 14;
+}
+
+message Genre {
+  int32  id   = 1;
+  string name = 2;
+}
+
+message Studio {
+  int32  id   = 1;
+  string name = 2;
+}
+
+message SearchAnimeRequest {
+  string q          = 1;
+  string genre      = 2;
+  string status     = 3;
+  string media_type = 4;
+}
+
+message SearchAnimeResponse {
+  repeated AnimeResponse data = 1;
+}
+
+message GetListRequest {
+  string status     = 1;
+  string media_type = 2;
+  string sort       = 3;
+  int32  min_score  = 4;
+}
+
+message GetListResponse {
+  int32                  total = 1;
+  repeated AnimeResponse data  = 2;
+}
+
+// ── Service ───────────────────────────────────────────────────────────────────
+
+service AnimeService {
+  rpc GetAnime  (GetAnimeRequest)    returns (AnimeResponse);
+  rpc Search    (SearchAnimeRequest) returns (SearchAnimeResponse);
+  rpc GetList   (GetListRequest)     returns (GetListResponse);
+}
